@@ -35,3 +35,26 @@ def test_mock_collect_evidence_imagepull():
     assert evidence["mode"] == "mock"
     describe = evidence["describe"]
     assert "ImagePullBackOff" in describe
+
+
+def test_heuristic_classifies_oncall_evidence_without_scenario_field():
+    from src.agent.graph import _detect_fault_type
+    from src.tools import mock_data
+
+    expected = {
+        "imagepull": "imagepull",
+        "oom": "oom",
+        "crashloop": "crashloop",
+        "pending": "pending",
+        "configmount": "configmount",
+        "probe": "probe",
+        "connectivity": "connectivity",
+    }
+    for scenario, fault in expected.items():
+        evidence = {
+            "pod": mock_data.MOCK_PODS[scenario],
+            "events": mock_data.MOCK_EVENTS[scenario],
+            "logs": mock_data.MOCK_LOGS[scenario],
+            "describe": mock_data.MOCK_DESCRIBE[scenario],
+        }
+        assert _detect_fault_type(evidence, "") == fault
