@@ -1,0 +1,20 @@
+# 故障：不存在的镜像 Tag → ImagePullBackOff
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-imagepull
+  labels:
+    app: demo
+    fault: imagepull
+spec:
+  restartPolicy: Always
+  containers:
+    - name: app
+      image: nginx:this-tag-does-not-exist-xyz
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi

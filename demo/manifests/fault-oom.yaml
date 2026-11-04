@@ -1,0 +1,23 @@
+# 故障：极低 memory limit + stress → OOMKilled
+# 镜像 polinux/stress 需能拉取；若环境无外网请改用本地已有镜像并调整 command
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-oom
+  labels:
+    app: demo
+    fault: oom
+spec:
+  restartPolicy: Always
+  containers:
+    - name: app
+      image: polinux/stress
+      command: ["stress"]
+      args: ["--vm", "1", "--vm-bytes", "128M", "--vm-hang", "1"]
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 10m
+        limits:
+          memory: 64Mi
+          cpu: 200m
