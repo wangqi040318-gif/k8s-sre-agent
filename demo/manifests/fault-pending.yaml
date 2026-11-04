@@ -1,0 +1,37 @@
+# 故障：requests 过大，且 nodeSelector / nodeAffinity 指向不存在的节点 → Pending / Unschedulable
+# 调度看 requests。本清单故意同时放上两类原因，只改其中一个仍然 Pending。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-pending
+  labels:
+    app: demo
+    fault: pending
+spec:
+  restartPolicy: Always
+  nodeSelector:
+    demo.sre/pool: oncall-pool-missing
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - node-that-does-not-exist
+  tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+  containers:
+    - name: app
+      image: nginx:1.27
+      resources:
+        requests:
+          cpu: "8"
+          memory: 16Gi
+        limits:
+          cpu: "8"
+          memory: 16Gi

@@ -20,4 +20,8 @@ kubectl delete -n "$NS" -f "$ROOT/demo/manifests/app-healthy.yaml" --ignore-not-
 kubectl delete -n "$NS" -f "$ROOT/demo/manifests/fault-imagepull.yaml" --ignore-not-found
 kubectl delete -n "$NS" -f "$ROOT/demo/manifests/fault-oom.yaml" --ignore-not-found
 kubectl delete -n "$NS" -f "$ROOT/demo/manifests/fault-crashloop.yaml" --ignore-not-found
+kubectl delete -n "$NS" -f "$ROOT/demo/manifests/fault-pending.yaml" --ignore-not-found
+kubectl delete -n "$NS" -f "$ROOT/demo/manifests/fault-configmount.yaml" --ignore-not-found
+kubectl delete -n "$NS" -f "$ROOT/demo/manifests/fault-probe.yaml" --ignore-not-found
+kubectl delete -n "$NS" -f "$ROOT/demo/manifests/fault-connectivity.yaml" --ignore-not-found
 echo "[demo] 清理完成。"
