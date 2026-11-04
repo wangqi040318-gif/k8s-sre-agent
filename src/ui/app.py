@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
 from pathlib import Path
@@ -14,6 +15,22 @@ if str(_ROOT) not in sys.path:
 import streamlit as st
 
 from src import config
+from src.scenarios import SCENARIO_CHOICES, scenario_label
+
+# Community Cloud 更新仓库后会重跑这个文件，但不会丢掉进程里已经导入的 src.config。
+# 扩展场景之前的那个模块有 MOCK / has_llm，没有 SCENARIO_CHOICES。
+# 侧栏若直接读旧对象，selectbox 会在启动时 AttributeError。
+# reload 改的是同一个模块对象，修复目录里随后读取的 config.SCENARIO_CHOICES 也会就位。
+_choices = getattr(config, "SCENARIO_CHOICES", None)
+_labels = getattr(config, "SCENARIO_LABELS", None)
+if (
+    not _choices
+    or not isinstance(_labels, dict)
+    or list(_choices) != list(SCENARIO_CHOICES)
+    or any(scenario_id not in _labels for scenario_id in SCENARIO_CHOICES)
+):
+    importlib.reload(config)
+
 from src.agent.graph import run_diagnose
 from src.rag.ingest import build_index
 from src.remediation.apply import CONFIRM_TYPED, apply_action
@@ -67,12 +84,12 @@ with st.sidebar:
     st.header("运行设置")
     scenario = st.selectbox(
         "故障场景",
-        options=config.SCENARIO_CHOICES,
-        format_func=lambda x: config.SCENARIO_LABELS[x],
+        options=SCENARIO_CHOICES,
+        format_func=scenario_label,
     )
     alert = st.text_area(
         "告警文本（可选）",
-        value=_SAMPLE_ALERTS[scenario],
+        value=_SAMPLE_ALERTS.get(scenario, ""),
         height=110,
         key=f"alert-{scenario}",
     )
