@@ -13,8 +13,12 @@
 ## 分类提示
 - Pending + 镜像相关 Events → ImagePull
 - OOMKilled / 137 → 内存
-- CrashLoopBackOff + Error exit → 应用/配置
-- Pending + FailedScheduling → 资源/亲和性（本 Demo 未覆盖）
+- CrashLoopBackOff + 进程非 0 退出 → 应用、启动命令或配置
+- Pending + FailedScheduling / Unschedulable → requests 过大，或 node affinity / selector / 污点
+- CreateContainerConfigError / FailedMount → 缺失的 ConfigMap 或 Secret、错误的卷
+- Running 但 Ready=False，Events 为 probe failed → 探针路径或端口。先改探针，不要删探针
+- Pod Ready 但 Service Endpoints 为空 → 选择器与 Pod 标签不一致
+- Endpoints 非空仍不通 → 再查 NetworkPolicy 和 CoreDNS。不要在 Endpoints 为空时先改策略
 
 ## 安全
 所有写操作标注「需人工确认」；生产禁止 Agent 自动执行破坏性命令。
