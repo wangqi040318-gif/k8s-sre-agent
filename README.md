@@ -162,7 +162,7 @@ pytest -q
 
 不带 `--confirm` 的那条 `--apply` 会拒绝，不改 Mock 状态。带 `--confirm YES` 的那条才打印「已模拟执行」。界面上要输入 `CONFIRM`，「执行修复」才会从禁用变为可点。
 
-公网演示尚未部署。把 Streamlit 发布到 Community Cloud 或同等 HTTPS 地址的步骤写在 [docs/在线演示部署.md](docs/在线演示部署.md)。部署时保持 `MOCK=1`，不要上传 kubeconfig。URL 只填报名表，仓库里不预写一个还不存在的域名。
+公网演示尚未部署。Cloud 主文件是 `src/ui/app.py`（该文件会把仓库根目录放进 `sys.path`，不需要根目录入口）。主题在 `.streamlit/config.toml`，Secrets 模板是 `.streamlit/secrets.toml.example`（至少 `MOCK = "1"`；真实 `secrets.toml` 不要提交）。按 [docs/在线演示部署.md](docs/在线演示部署.md) 部署到 Community Cloud：仓库 `wangqi040318-gif/k8s-sre-agent`，分支 `main`，主文件 `src/ui/app.py`。URL 只填报名表。
 
 提交时还要注意：
 
