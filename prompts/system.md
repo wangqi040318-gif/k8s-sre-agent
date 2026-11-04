@@ -7,3 +7,4 @@
 4. 使用中文撰写报告，技术标识符保持英文原文（如 ImagePullBackOff）。
 5. 不要编造未在证据中出现的集群事实；不确定时明确说明。
 6. remediation 只是提案。不要声称已经执行 kubectl / API 写操作，也不要声称集群已经被修复。
+7. 值班里还常见 Pending/FailedScheduling、CreateContainerConfigError/FailedMount、探针未就绪、Service Endpoints 为空。NetworkPolicy 只有证据写明拒绝时才当作根因。不要建议对节点做 cordon、drain 或删除。

@@ -121,19 +121,36 @@ def _result(
 def _mock_summary(entry: dict[str, Any]) -> str:
     pod = entry.get("pod") or {}
     meta = pod.get("metadata") or {}
+    spec = pod.get("spec") or {}
     bits = [f"{meta.get('namespace', 'default')}/{meta.get('name', '?')}"]
-    for container in (pod.get("spec") or {}).get("containers") or []:
-        limits = ((container.get("resources") or {}).get("limits") or {})
+    if spec.get("nodeSelector"):
+        bits.append(f"nodeSelector={spec['nodeSelector']}")
+    if spec.get("affinity"):
+        bits.append("affinity=yes")
+    for container in spec.get("containers") or []:
+        resources = container.get("resources") or {}
+        limits = resources.get("limits") or {}
+        requests = resources.get("requests") or {}
         parts = [f"image={container.get('image')}"]
         if limits.get("memory"):
             parts.append(f"memory={limits['memory']}")
+        if requests.get("cpu"):
+            parts.append(f"cpu_request={requests['cpu']}")
         if container.get("command"):
             parts.append(f"command={container['command']}")
+        for probe_name in ("readinessProbe", "livenessProbe"):
+            http = ((container.get(probe_name) or {}).get("httpGet") or {})
+            if http:
+                parts.append(f"{probe_name}={http.get('path')}:{http.get('port')}")
         bits.append(f"{container.get('name')}: " + " ".join(parts))
+    for name, data in (entry.get("configmaps") or {}).items():
+        bits.append(f"configmap {name} keys={sorted(data)}")
+    for name, service in (entry.get("services") or {}).items():
+        bits.append(f"service {name} selector={service.get('selector')}")
     return "；".join(bits)
 
 
-def _simulate(action: dict[str, Any]) -> dict[str, Any]:
+def _ensure_runtime(action: dict[str, Any]) -> dict[str, Any]:
     api_op = action["api_op"]
     scenario = action["scenario"]
     namespace = api_op["namespace"]
@@ -144,20 +161,79 @@ def _simulate(action: dict[str, Any]) -> dict[str, Any]:
         template.setdefault("metadata", {})
         template["metadata"]["name"] = pod_name
         template["metadata"]["namespace"] = namespace
-        _MOCK_RUNTIME[key] = {"pod": template, "applied_actions": []}
-
+        _MOCK_RUNTIME[key] = {
+            "pod": template,
+            "applied_actions": [],
+            "configmaps": {},
+            "services": {},
+        }
     entry = _MOCK_RUNTIME[key]
-    containers = entry["pod"].setdefault("spec", {}).setdefault("containers", [])
-    target = None
-    for container in containers:
-        if container.get("name") == api_op["container"]:
-            target = container
-            break
-    if target is None:
-        target = {"name": api_op["container"]}
-        containers.append(target)
+    entry.setdefault("configmaps", {})
+    entry.setdefault("services", {})
+    return entry
 
+
+def _target_container(entry: dict[str, Any], name: str) -> dict[str, Any]:
+    containers = entry["pod"].setdefault("spec", {}).setdefault("containers", [])
+    for container in containers:
+        if container.get("name") == name:
+            return container
+    target = {"name": name}
+    containers.append(target)
+    return target
+
+
+def _mark_ready(entry: dict[str, Any]) -> None:
+    status = entry["pod"].setdefault("status", {})
+    status["phase"] = "Running"
+    statuses = status.get("containerStatuses")
+    if not statuses:
+        status["containerStatuses"] = [
+            {
+                "name": "app",
+                "ready": True,
+                "restartCount": 0,
+                "state": {"running": {"startedAt": "simulated"}},
+            }
+        ]
+    else:
+        for container_status in statuses:
+            container_status["ready"] = True
+            container_status["state"] = {"running": {"startedAt": "simulated"}}
+    for condition in status.get("conditions") or []:
+        if condition.get("type") in {"Ready", "PodScheduled", "ContainersReady"}:
+            condition["status"] = "True"
+            condition.pop("reason", None)
+            condition.pop("message", None)
+
+
+def _finish(entry: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
+    entry["applied_actions"].append(action["id"])
+    entry["phase"] = "simulated-fixed"
+    entry["last_command"] = action["command"]
+    return copy.deepcopy(entry)
+
+
+def _simulate(action: dict[str, Any]) -> dict[str, Any]:
+    api_op = action["api_op"]
     op = api_op["op"]
+    entry = _ensure_runtime(action)
+    spec = entry["pod"].setdefault("spec", {})
+
+    if op == "create_configmap":
+        entry["configmaps"][api_op["name"]] = dict(api_op["data"])
+        _mark_ready(entry)
+        return _finish(entry, action)
+
+    if op == "fix_selector":
+        entry["services"][api_op["service"]] = {
+            "selector": dict(api_op["selector"]),
+            "endpoints": [api_op["pod"]],
+        }
+        _mark_ready(entry)
+        return _finish(entry, action)
+
+    target = _target_container(entry, api_op["container"])
     if op == "fix_image":
         target["image"] = api_op["image"]
     elif op == "bump_memory":
@@ -169,18 +245,30 @@ def _simulate(action: dict[str, Any]) -> dict[str, Any]:
         target.pop("args", None)
         for probe in ("livenessProbe", "readinessProbe", "startupProbe"):
             target.pop(probe, None)
+    elif op == "relax_scheduling":
+        resources = target.setdefault("resources", {})
+        requests = resources.setdefault("requests", {})
+        requests["cpu"] = api_op["cpu_request"]
+        requests["memory"] = api_op["memory_request"]
+        limits = resources.setdefault("limits", {})
+        limits["cpu"] = api_op["cpu_limit"]
+        limits["memory"] = api_op["memory_limit"]
+        if api_op.get("remove_affinity", True):
+            spec.pop("affinity", None)
+        if api_op.get("remove_node_selector", True):
+            spec.pop("nodeSelector", None)
+    elif op == "fix_probe":
+        for probe_name in api_op.get("probes") or []:
+            probe = target.get(probe_name)
+            if not isinstance(probe, dict) or not isinstance(probe.get("httpGet"), dict):
+                raise RuntimeError(f"{probe_name} 不是 httpGet 探针，已停止模拟")
+            probe["httpGet"]["path"] = api_op["path"]
+            probe["httpGet"]["port"] = api_op["port"]
     else:
         raise RuntimeError(f"不支持的 API 操作: {op}")
 
-    status = entry["pod"].setdefault("status", {})
-    status["phase"] = "Running"
-    for container_status in status.get("containerStatuses") or []:
-        container_status["ready"] = True
-        container_status["state"] = {"running": {"startedAt": "simulated"}}
-    entry["applied_actions"].append(action["id"])
-    entry["phase"] = "simulated-fixed"
-    entry["last_command"] = action["command"]
-    return copy.deepcopy(entry)
+    _mark_ready(entry)
+    return _finish(entry, action)
 
 
 def apply_action(

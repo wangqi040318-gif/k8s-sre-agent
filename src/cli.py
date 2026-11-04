@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--scenario",
-        choices=["imagepull", "oom", "crashloop"],
+        choices=config.SCENARIO_CHOICES,
         default=None,
         help="预设故障场景",
     )
@@ -84,7 +84,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--action",
         default=None,
-        help="修复动作 id，例如 fix-image、bump-memory、fix-command",
+        help=(
+            "修复动作 id，例如 fix-image、bump-memory、fix-command、"
+            "relax-scheduling、create-config、fix-probe、fix-selector"
+        ),
     )
     return parser
 

@@ -1,0 +1,36 @@
+# 故障：环境变量和卷都引用不存在的 ConfigMap app-config
+# → CreateContainerConfigError，同时 FailedMount。不要在这份清单里把 ConfigMap 一起建出来。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-configmount
+  labels:
+    app: demo
+    fault: configmount
+spec:
+  restartPolicy: Always
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "echo started; sleep 3600"]
+      env:
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_LEVEL
+      volumeMounts:
+        - name: config
+          mountPath: /etc/app
+          readOnly: true
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+  volumes:
+    - name: config
+      configMap:
+        name: app-config

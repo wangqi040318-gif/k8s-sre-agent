@@ -23,6 +23,33 @@ logger.setLevel(logging.INFO)
 
 st.set_page_config(page_title="K8s SRE Agent", page_icon="🩺", layout="wide")
 
+# 跟场景走。切换下拉时用新的 widget key，避免 Streamlit 记住上一个场景的告警文本。
+_SAMPLE_ALERTS = {
+    "imagepull": (
+        "告警：Pod/demo-imagepull 处于 ImagePullBackOff，"
+        "镜像 nginx:this-tag-does-not-exist-xyz 拉取失败"
+    ),
+    "oom": "告警：Pod/demo-oom 反复重启，lastState=OOMKilled，exitCode=137，memory limit 64Mi",
+    "crashloop": (
+        "告警：Pod/demo-crashloop CrashLoopBackOff，退出码 1，日志缺少 /etc/app/config.yaml"
+    ),
+    "pending": (
+        "告警：Pod/demo-pending 持续 Pending，FailedScheduling："
+        "CPU/内存请求过大，且 node affinity/selector 对不上任何节点"
+    ),
+    "configmount": (
+        "告警：Pod/demo-configmount CreateContainerConfigError / FailedMount，"
+        "ConfigMap app-config 不存在"
+    ),
+    "probe": (
+        "告警：Pod/demo-probe 处于 Running 但未 Ready，"
+        "readiness/liveness 访问 :8080/healthz 失败，应用监听 80"
+    ),
+    "connectivity": (
+        "告警：Service/demo-web Endpoints 为空，选择器 app=frontend 与 Pod 标签 app=demo 不一致"
+    ),
+}
+
 st.title("🩺 K8s 故障诊断 Agent")
 st.caption(
     "传智杯作品骨架 · 默认 MOCK 模式（无需真实集群）· "
@@ -40,17 +67,14 @@ with st.sidebar:
     st.header("运行设置")
     scenario = st.selectbox(
         "故障场景",
-        options=["imagepull", "oom", "crashloop"],
-        format_func=lambda x: {
-            "imagepull": "ImagePullBackOff",
-            "oom": "OOMKilled",
-            "crashloop": "CrashLoopBackOff",
-        }[x],
+        options=config.SCENARIO_CHOICES,
+        format_func=lambda x: config.SCENARIO_LABELS[x],
     )
     alert = st.text_area(
         "告警文本（可选）",
-        value=f"Prometheus 告警：Pod 处于异常状态，疑似 {scenario}",
-        height=100,
+        value=_SAMPLE_ALERTS[scenario],
+        height=110,
+        key=f"alert-{scenario}",
     )
     namespace = st.text_input("Namespace", value=config.K8S_NAMESPACE)
     pod = st.text_input("Pod 名称（可选，Mock 可留空）", value="")

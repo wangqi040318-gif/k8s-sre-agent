@@ -16,8 +16,29 @@ from src.agent.graph import run_diagnose
 from src.cli import main
 from src.rag.ingest import build_index
 from src.remediation.apply import apply_action, get_mock_state, reset_mock_state
-from src.remediation.catalog import FIX_IMAGE, MEMORY_LIMIT
-from src.remediation.manifest import build_json_patch, sanitized_pod_manifest
+from src.remediation.catalog import (
+    CONFIGMAP_DATA,
+    CONFIGMAP_NAME,
+    FIX_IMAGE,
+    MEMORY_LIMIT,
+    PROBE_PATH,
+    PROBE_PORT,
+    SCHEDULE_CPU_LIMIT,
+    SCHEDULE_CPU_REQUEST,
+    SCHEDULE_MEMORY_LIMIT,
+    SCHEDULE_MEMORY_REQUEST,
+    SERVICE_NAME,
+    SERVICE_SELECTOR,
+)
+from src.remediation.manifest import (
+    build_configmap_key_patch,
+    build_json_patch,
+    build_selector_patch,
+    pod_labels_match,
+    pod_references_configmap,
+    sanitized_pod_manifest,
+)
+from src.tools.mock_data import MOCK_PODS
 
 
 @pytest.fixture(autouse=True)
@@ -54,11 +75,25 @@ def test_diagnose_still_works_and_includes_remediation():
 
 @pytest.mark.parametrize(
     ("scenario", "action_id"),
-    [("imagepull", "fix-image"), ("oom", "bump-memory"), ("crashloop", "fix-command")],
+    [
+        ("imagepull", "fix-image"),
+        ("oom", "bump-memory"),
+        ("crashloop", "fix-command"),
+        ("pending", "relax-scheduling"),
+        ("unschedulable", "relax-scheduling"),
+        ("configmount", "create-config"),
+        ("createcontainerconfigerror", "create-config"),
+        ("probe", "fix-probe"),
+        ("connectivity", "fix-selector"),
+        ("endpoints", "fix-selector"),
+    ],
 )
 def test_each_demo_fault_proposes_its_action(scenario, action_id):
-    _result, actions = _remediation(scenario)
+    result, actions = _remediation(scenario)
     assert [item["id"] for item in actions] == [action_id]
+    assert result["report_json"]["human_confirm_required"] is True
+    assert "修复方案（需人工确认）" in result["report_markdown"]
+    assert get_mock_state() == {}
 
 
 def test_diagnose_cli_does_not_apply(capsys, monkeypatch):
@@ -276,7 +311,19 @@ def test_sanitized_pod_manifest_rewrites_image_and_drops_status():
     assert manifest["metadata"]["annotations"] == {"demo": "keep"}
 
 
-def test_live_without_cluster_fails_closed(monkeypatch):
+@pytest.mark.parametrize(
+    ("action_id", "scenario"),
+    [
+        ("fix-image", "imagepull"),
+        ("bump-memory", "oom"),
+        ("fix-command", "crashloop"),
+        ("relax-scheduling", "pending"),
+        ("create-config", "configmount"),
+        ("fix-probe", "probe"),
+        ("fix-selector", "connectivity"),
+    ],
+)
+def test_live_without_cluster_fails_closed(monkeypatch, action_id, scenario):
     monkeypatch.setattr("src.config.MOCK", False)
 
     def _no_client():
@@ -293,11 +340,187 @@ def test_live_without_cluster_fails_closed(monkeypatch):
     monkeypatch.setattr("src.remediation.live.shutil.which", _no_kubectl)
     monkeypatch.setattr("src.remediation.live.subprocess.run", _forbid_subprocess)
 
-    result = apply_action("fix-image", confirm="YES", scenario="imagepull")
+    result = apply_action(action_id, confirm="YES", scenario=scenario)
     assert result.ok is False
     assert result.simulated is False
     assert result.refused is False
     assert "未执行任何变更" in result.message
+    assert get_mock_state() == {}
+
+
+def test_oncall_actions_require_confirm_then_update_mock_only():
+    refused = apply_action("relax-scheduling", confirm=None, scenario="pending")
+    assert refused.refused is True
+    assert get_mock_state() == {}
+
+    pending = apply_action("relax-scheduling", confirm="YES", scenario="pending")
+    assert pending.ok and pending.simulated
+    state = get_mock_state()["default/demo-pending"]
+    container = state["pod"]["spec"]["containers"][0]
+    assert container["resources"]["requests"]["cpu"] == SCHEDULE_CPU_REQUEST
+    assert container["resources"]["requests"]["memory"] == SCHEDULE_MEMORY_REQUEST
+    assert container["resources"]["limits"]["cpu"] == SCHEDULE_CPU_LIMIT
+    assert container["resources"]["limits"]["memory"] == SCHEDULE_MEMORY_LIMIT
+    assert "affinity" not in state["pod"]["spec"]
+    assert "nodeSelector" not in state["pod"]["spec"]
+    assert state["pod"]["spec"]["tolerations"]
+
+    reset_mock_state()
+    mounted = apply_action("create-config", confirm="CONFIRM", scenario="configmount")
+    assert mounted.ok and mounted.simulated
+    configmaps = get_mock_state()["default/demo-configmount"]["configmaps"]
+    assert configmaps[CONFIGMAP_NAME] == CONFIGMAP_DATA
+
+    reset_mock_state()
+    probed = apply_action("fix-probe", confirm="YES", scenario="probe")
+    assert probed.ok and probed.simulated
+    spec = get_mock_state()["default/demo-probe"]["pod"]["spec"]["containers"][0]
+    for probe_name in ("readinessProbe", "livenessProbe"):
+        http = spec[probe_name]["httpGet"]
+        assert http["path"] == PROBE_PATH
+        assert http["port"] == PROBE_PORT
+        assert spec[probe_name]["periodSeconds"] == 5
+        assert spec[probe_name]["failureThreshold"] == 3
+
+    reset_mock_state()
+    selected = apply_action("fix-selector", confirm="YES", scenario="connectivity")
+    assert selected.ok and selected.simulated
+    service = get_mock_state()["default/demo-connectivity"]["services"][SERVICE_NAME]
+    assert service["selector"] == SERVICE_SELECTOR
+    assert "NetworkPolicy" not in selected.command or "不改" in selected.command
+    mismatch = apply_action("fix-selector", confirm="YES", scenario="pending")
+    assert mismatch.refused is True
+
+
+def test_scheduling_and_probe_patches_stay_narrow():
+    container = {
+        "name": "app",
+        "image": "nginx:1.27",
+        "resources": {
+            "requests": {"cpu": "8", "memory": "16Gi", "ephemeral-storage": "1Gi"},
+            "limits": {"cpu": "8", "memory": "16Gi"},
+        },
+        "readinessProbe": {
+            "httpGet": {"path": "/healthz", "port": 8080},
+            "periodSeconds": 5,
+            "failureThreshold": 3,
+        },
+        "livenessProbe": {
+            "httpGet": {"path": "/healthz", "port": 8080},
+            "periodSeconds": 5,
+            "failureThreshold": 3,
+        },
+    }
+    pod_spec = {
+        "containers": [container],
+        "affinity": {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": {}}},
+        "nodeSelector": {"demo.sre/pool": "oncall-pool-missing"},
+        "tolerations": [{"key": "node.kubernetes.io/not-ready", "operator": "Exists"}],
+    }
+    ops = build_json_patch(
+        container,
+        0,
+        {
+            "op": "relax_scheduling",
+            "container": "app",
+            "cpu_request": SCHEDULE_CPU_REQUEST,
+            "memory_request": SCHEDULE_MEMORY_REQUEST,
+            "cpu_limit": SCHEDULE_CPU_LIMIT,
+            "memory_limit": SCHEDULE_MEMORY_LIMIT,
+            "remove_affinity": True,
+            "remove_node_selector": True,
+        },
+        pod_spec=pod_spec,
+    )
+    paths = [item["path"] for item in ops]
+    assert "/spec/template/spec/affinity" in paths
+    assert "/spec/template/spec/nodeSelector" in paths
+    assert not any("tolerations" in path for path in paths)
+    assert not any("ephemeral-storage" in path for path in paths)
+    cpu = next(item for item in ops if item["path"].endswith("requests/cpu"))
+    assert cpu["value"] == SCHEDULE_CPU_REQUEST
+
+    probe_ops = build_json_patch(
+        container,
+        0,
+        {
+            "op": "fix_probe",
+            "container": "app",
+            "path": PROBE_PATH,
+            "port": PROBE_PORT,
+            "probes": ["readinessProbe", "livenessProbe"],
+        },
+    )
+    probe_paths = [item["path"] for item in probe_ops]
+    assert probe_paths == [
+        "/spec/template/spec/containers/0/readinessProbe/httpGet/path",
+        "/spec/template/spec/containers/0/readinessProbe/httpGet/port",
+        "/spec/template/spec/containers/0/livenessProbe/httpGet/path",
+        "/spec/template/spec/containers/0/livenessProbe/httpGet/port",
+    ]
+    assert all(item["op"] == "replace" for item in probe_ops)
+
+    manifest = sanitized_pod_manifest(
+        MOCK_PODS["pending"],
+        {
+            "op": "relax_scheduling",
+            "namespace": "default",
+            "pod": "demo-pending",
+            "container": "app",
+            "cpu_request": SCHEDULE_CPU_REQUEST,
+            "memory_request": SCHEDULE_MEMORY_REQUEST,
+            "cpu_limit": SCHEDULE_CPU_LIMIT,
+            "memory_limit": SCHEDULE_MEMORY_LIMIT,
+            "remove_affinity": True,
+            "remove_node_selector": True,
+        },
+    )
+    assert "affinity" not in manifest["spec"]
+    assert "nodeSelector" not in manifest["spec"]
+    assert manifest["spec"]["tolerations"]
+    assert manifest["spec"]["containers"][0]["resources"]["requests"]["cpu"] == SCHEDULE_CPU_REQUEST
+
+
+def test_configmap_patch_does_not_overwrite_and_selector_replaces_map():
+    ops = build_configmap_key_patch(
+        {"LOG_LEVEL": "debug", "owner": "keep"},
+        {"LOG_LEVEL": "info", "config.yaml": "mode: demo\n"},
+    )
+    assert ops == [
+        {"op": "add", "path": "/data/config.yaml", "value": "mode: demo\n"},
+    ]
+    assert build_configmap_key_patch(
+        {"LOG_LEVEL": "info", "config.yaml": "mode: demo\n"},
+        dict(CONFIGMAP_DATA),
+    ) == []
+    assert build_configmap_key_patch(None, dict(CONFIGMAP_DATA)) == [
+        {"op": "add", "path": "/data", "value": dict(CONFIGMAP_DATA)},
+    ]
+
+    selector_ops = build_selector_patch({"app": "frontend", "tier": "old"}, dict(SERVICE_SELECTOR))
+    assert selector_ops == [
+        {"op": "replace", "path": "/spec/selector", "value": {"app": "demo"}},
+    ]
+    assert "ports" not in selector_ops[0]["path"]
+    assert pod_references_configmap(MOCK_PODS["configmount"], CONFIGMAP_NAME)
+    assert not pod_references_configmap(MOCK_PODS["configmount"], "other")
+    assert pod_labels_match(MOCK_PODS["connectivity"], SERVICE_SELECTOR)
+    assert not pod_labels_match(MOCK_PODS["connectivity"], {"app": "frontend"})
+
+
+@pytest.mark.parametrize(
+    ("scenario", "needle"),
+    [
+        ("pending", "pending"),
+        ("configmount", "configmount"),
+        ("probe", "probe"),
+        ("connectivity", "endpoint"),
+    ],
+)
+def test_runbook_retrieved_for_oncall_faults(scenario, needle):
+    result, _actions = _remediation(scenario)
+    ids = " ".join(item.get("id", "") for item in result["runbooks"])
+    assert needle in ids
     assert get_mock_state() == {}
 
 

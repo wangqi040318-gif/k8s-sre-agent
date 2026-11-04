@@ -1,0 +1,39 @@
+# 故障：Pod 标签是 app=demo 且可以就绪，Service 选择器仍是 app=frontend → Endpoints 为空
+# 不在这个文件里加 NetworkPolicy。默认拒绝会波及同命名空间的其他演示 Pod。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-connectivity
+  labels:
+    app: demo
+    fault: connectivity
+spec:
+  restartPolicy: Always
+  containers:
+    - name: app
+      image: nginx:1.27
+      ports:
+        - name: http
+          containerPort: 80
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-web
+  labels:
+    app: demo
+    fault: connectivity
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
