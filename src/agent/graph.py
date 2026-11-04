@@ -9,6 +9,7 @@ from typing import Any
 from src import config
 from src.agent.state import DiagnoseState
 from src.rag.retrieve import build_query_from_evidence, retrieve_runbooks
+from src.remediation.catalog import build_remediation, render_remediation_markdown
 from src.tools.k8s_tools import collect_evidence
 
 
@@ -271,8 +272,51 @@ def node_retrieve(state: DiagnoseState) -> DiagnoseState:
     return {**state, "runbooks": runbooks}
 
 
+def _replace_embedded_json(markdown: str, report_json: dict[str, Any]) -> str:
+    """让文末 JSON 与 report_json 一致（含 remediation）。"""
+    block = "```json\n" + json.dumps(report_json, ensure_ascii=False, indent=2) + "\n```"
+    pattern = r"```json\n[\s\S]*?\n```"
+    if re.search(pattern, markdown):
+        return re.sub(pattern, block, markdown, count=1)
+    return markdown
+
+
+def _upsert_remediation_section(markdown: str, section: str) -> str:
+    heading = "## 修复方案（需人工确认）"
+    section = section.strip() + "\n"
+    if heading in markdown:
+        pattern = rf"{re.escape(heading)}[\s\S]*?(?=\n## |\Z)"
+        return re.sub(pattern, section + "\n", markdown, count=1)
+    for marker in ("## 风险提示", "## 结构化 JSON"):
+        if marker in markdown:
+            return markdown.replace(marker, section + "\n" + marker, 1)
+    return markdown.rstrip() + "\n\n" + section
+
+
+def _ensure_remediation(
+    markdown: str,
+    report_json: dict[str, Any] | None,
+    fault: str,
+    evidence: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """把目录中的修复提案写入报告。不执行，也不采用模型自由生成的命令。"""
+    actions = build_remediation(
+        fault,
+        namespace=evidence.get("namespace") or config.K8S_NAMESPACE,
+        pod_name=evidence.get("pod_name"),
+    )
+    report = dict(report_json or {})
+    report["remediation"] = actions
+    report["human_confirm_required"] = True
+    report.setdefault("fault_type", fault)
+    section = render_remediation_markdown(actions)
+    markdown = _upsert_remediation_section(markdown, section)
+    markdown = _replace_embedded_json(markdown, report)
+    return markdown, report
+
+
 def node_diagnose(state: DiagnoseState) -> DiagnoseState:
-    """诊断报告节点。"""
+    """诊断报告节点。只产出提案，不调用 apply。"""
     evidence = state.get("evidence") or {}
     runbooks = state.get("runbooks") or []
     alert_text = state.get("alert_text") or ""
@@ -285,6 +329,8 @@ def node_diagnose(state: DiagnoseState) -> DiagnoseState:
     else:
         md, report_json = _rule_based_report(fault, evidence, runbooks, alert_text)
         llm_used = False
+
+    md, report_json = _ensure_remediation(md, report_json, fault, evidence)
 
     return {
         **state,

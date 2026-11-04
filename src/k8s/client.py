@@ -10,14 +10,15 @@ from src import config
 logger = logging.getLogger(__name__)
 
 _core_v1: Any = None
+_apps_v1: Any = None
 _loaded = False
 
 
-def get_core_v1():
-    """懒加载 CoreV1Api；失败时返回 None。"""
-    global _core_v1, _loaded
+def _load_clients() -> None:
+    """懒加载 CoreV1 / AppsV1；失败时两者都保持 None。"""
+    global _core_v1, _apps_v1, _loaded
     if _loaded:
-        return _core_v1
+        return
     _loaded = True
     try:
         from kubernetes import client, config as k8s_config
@@ -30,11 +31,23 @@ def get_core_v1():
             except Exception:  # noqa: BLE001
                 k8s_config.load_kube_config()
         _core_v1 = client.CoreV1Api()
-        return _core_v1
+        _apps_v1 = client.AppsV1Api()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Kubernetes 客户端不可用: %s", exc)
         _core_v1 = None
-        return None
+        _apps_v1 = None
+
+
+def get_core_v1():
+    """懒加载 CoreV1Api；失败时返回 None。"""
+    _load_clients()
+    return _core_v1
+
+
+def get_apps_v1():
+    """懒加载 AppsV1Api；失败时返回 None。"""
+    _load_clients()
+    return _apps_v1
 
 
 def cluster_available() -> bool:

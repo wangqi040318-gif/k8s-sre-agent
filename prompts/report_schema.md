@@ -10,8 +10,20 @@
   "runbooks_used": ["runbook id..."],
   "suggestions": ["建议命令，写操作标注需人工确认"],
   "risks": "风险说明",
-  "human_confirm_required": true
+  "human_confirm_required": true,
+  "remediation": [
+    {
+      "id": "fix-image",
+      "description": "修复说明",
+      "command": "kubectl ...（仅提案）",
+      "api_op": {"op": "fix_image"},
+      "risk_level": "low|medium|high",
+      "reversible": true
+    }
+  ]
 }
 ```
 
-Markdown 建议章节：现象、根因判断、关键证据、参考 Runbook、建议操作、风险提示。
+`remediation` 只是提案。不要声称已经执行写操作。诊断流程不会自动 apply。
+
+Markdown 建议章节：现象、根因判断、关键证据、参考 Runbook、建议操作、修复方案（需人工确认）、风险提示。
