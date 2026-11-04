@@ -1,0 +1,19 @@
+# Streamlit Community Cloud 与本地 `streamlit run` 都会读这个文件。
+# 不要设置 server.port、server.address 或 browser.serverAddress。
+# Cloud 自己分配端口；写死这些项会导致部署后的进程起不来。
+
+[server]
+# 无图形界面时不尝试打开浏览器，也不在第一次启动时询问邮箱。
+headless = true
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#0F6E56"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F6F5"
+textColor = "#1B1F1E"
+font = "sans-serif"

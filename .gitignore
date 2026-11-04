@@ -12,7 +12,15 @@ __pycache__/
 dist/
 build/
 .DS_Store
+# 真实密钥只放在本地或 Cloud Secrets。secrets.toml.example 可以提交。
 .streamlit/secrets.toml
 *.log
 .coverage
 htmlcov/
+
+# 演示录像体积大，按赛方要求另交 MP4 或视频平台链接
+recordings/**/*.mp4
+recordings/**/*.mov
+recordings/**/*.webm
+recordings/**/*.mkv
+recordings/**/*.avi
