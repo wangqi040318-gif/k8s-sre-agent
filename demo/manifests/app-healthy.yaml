@@ -1,0 +1,21 @@
+# 健康对照：可正常 Running 的简单 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-healthy
+  labels:
+    app: demo
+    fault: none
+spec:
+  restartPolicy: Always
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "echo healthy; sleep 3600"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
