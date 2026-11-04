@@ -21,7 +21,11 @@ def _read_prompt(name: str) -> str:
 
 
 def _detect_fault_type(evidence: dict[str, Any], alert_text: str = "") -> str:
-    """根据证据/告警启发式判定故障类型。"""
+    """根据证据/告警启发式判定故障类型。
+
+    显式场景优先。其余按值班里更具体的证据短语匹配，探针先于 CrashLoop，
+    避免存活探针把容器打重启后被收成「进程自己退出」。
+    """
     scenario = config.normalize_scenario(evidence.get("scenario"))
     if scenario:
         return scenario
@@ -40,6 +44,35 @@ def _detect_fault_type(evidence: dict[str, Any], alert_text: str = "") -> str:
         return "imagepull"
     if "oomkill" in blob or "oom" in blob or "exit code\": 137" in blob or "exitcode\": 137" in blob:
         return "oom"
+    if (
+        "readiness probe failed" in blob
+        or "liveness probe failed" in blob
+        or "probe failed" in blob
+    ):
+        return "probe"
+    if (
+        "createcontainerconfigerror" in blob
+        or "failedmount" in blob
+        or "configmap" in blob
+        or 'secret "' in blob
+    ):
+        return "configmount"
+    if (
+        "failedscheduling" in blob
+        or "unschedulable" in blob
+        or "insufficient cpu" in blob
+        or "insufficient memory" in blob
+        or "node affinity" in blob
+    ):
+        return "pending"
+    if (
+        "endpoints is empty" in blob
+        or "endpoints: <none>" in blob
+        or "endpoints <none>" in blob
+        or "matches 0 pods" in blob
+        or "no ready addresses" in blob
+    ):
+        return "connectivity"
     if "crashloop" in blob or "back-off restarting" in blob:
         return "crashloop"
     return "general"
@@ -67,6 +100,24 @@ def _suggest_commands(fault: str, namespace: str, pod_name: str | None) -> list[
             f"kubectl logs {pod} -n {ns} --all-containers  # 需人工确认",
             "# 检查 ConfigMap/环境变量与探针配置，避免盲目删重建",
         ],
+        "pending": [
+            f"kubectl get pod {pod} -n {ns} -o jsonpath='{{.spec.nodeSelector}}'  # 需人工确认",
+            "# 先看 FailedScheduling 是资源不够，还是 affinity/taint。不要直接改节点",
+        ],
+        "configmount": [
+            f"kubectl get configmap,secret -n {ns}  # 需人工确认",
+            "# 只补缺失对象。Secret 走审批，不要把密钥写进命令行或 Runbook",
+        ],
+        "probe": [
+            "# 对照容器实际监听的端口和路径，再改探针。不要靠删探针假装 Ready",
+        ],
+        "connectivity": [
+            "kubectl get svc demo-web -n "
+            + ns
+            + " -o jsonpath='{.spec.selector}'  # 需人工确认",
+            "kubectl get endpoints demo-web -n " + ns + "  # 需人工确认",
+            "# Endpoints 为空先对选择器。有地址仍不通，再查 NetworkPolicy 和 CoreDNS",
+        ],
         "general": [],
     }
     return common + extra.get(fault, [])
@@ -83,6 +134,10 @@ def _rule_based_report(
         "imagepull": "ImagePullBackOff：镜像拉取失败",
         "oom": "OOMKilled：容器内存超限被杀",
         "crashloop": "CrashLoopBackOff：容器反复崩溃",
+        "pending": "Pending / Unschedulable：Pod 排不上节点",
+        "configmount": "CreateContainerConfigError / FailedMount：配置对象缺失",
+        "probe": "探针未就绪：Pod 在跑但没有 Ready",
+        "connectivity": "Service 无 Endpoints：选择器对不上 Pod",
         "general": "通用排查：尚未匹配到明确故障类型",
     }
     root_causes = {
@@ -98,12 +153,35 @@ def _rule_based_report(
             "进程非 0 退出后被 kubelet 反复重启；常见原因包括配置缺失、依赖未就绪、"
             "启动命令错误或健康检查失败。"
         ),
+        "pending": (
+            "调度器没有可用节点：requests 超过节点可分配资源，"
+            "和/或 nodeSelector、nodeAffinity 要求的标签在集群里不存在。"
+            "本例同时带了这两类条件，所以只改其中一个，Pod 仍会 Pending。"
+        ),
+        "configmount": (
+            "Pod 通过环境变量和卷引用 ConfigMap `app-config`，对象不存在。"
+            "kubelet 因此报 CreateContainerConfigError，卷挂载报 FailedMount。"
+            "这不是进程启动后的崩溃。"
+        ),
+        "probe": (
+            "容器在 80 端口提供 HTTP，readiness 和 liveness 却访问 8080 的 `/healthz`，"
+            "所以 Pod 一直 Running 但不 Ready，存活探针失败还会重启容器。"
+        ),
+        "connectivity": (
+            "Pod 本身 Ready，标签是 `app=demo`。Service `demo-web` 的选择器仍是 "
+            "`app=frontend`，Endpoints 为空。DNS 能解析到 ClusterIP，但没有后端。"
+            "本例没有拒绝流量的 NetworkPolicy；Endpoints 非空仍不通时才继续查策略和 CoreDNS。"
+        ),
         "general": "证据不足以自动判定，请结合 Events 与日志继续人工排查。",
     }
     risks = {
         "imagepull": "盲目改镜像 Tag 或共享凭证可能导致更多错误部署；生产变更需审批。",
         "oom": "直接调高 limit 可能掩盖泄漏并挤占节点；删除 Pod 会短暂中断流量。",
         "crashloop": "频繁删重建可能丢失排障窗口；错误改 ConfigMap 会影响同命名空间工作负载。",
+        "pending": "把 requests 降得过低会在节点上超卖；删掉亲和性可能把 Pod 调度到不该去的节点。",
+        "configmount": "补错 ConfigMap 或把 Secret 内容写进清单会扩大泄露面。本动作只创建非敏感 ConfigMap，且不覆盖已有键。",
+        "probe": "改错端口会让流量打到未就绪的 Pod，或让存活探针继续重启容器。不要用删除探针代替修正路径。",
+        "connectivity": "改选择器会立刻切换 Service 的后端。本动作只改 demo-web 的 selector，不改端口，也不放宽 NetworkPolicy。",
         "general": "在证据不足时执行写操作风险高，请先只读取证。",
     }
 

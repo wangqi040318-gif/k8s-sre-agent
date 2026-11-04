@@ -2,7 +2,7 @@
 
 ```json
 {
-  "fault_type": "imagepull|oom|crashloop|general",
+  "fault_type": "imagepull|oom|crashloop|pending|configmount|probe|connectivity|general",
   "title": "简短标题",
   "phenomenon": "现象描述",
   "root_cause": "根因判断",
