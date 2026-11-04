@@ -5,6 +5,8 @@
 
 > **两周作品定位一句话**：做一个会查 K8s、会翻 Runbook、会出「需人工确认」处置建议的故障诊断 Agent，而不是又一个聊天框。
 
+传智杯材料（中文）：[提交清单](docs/提交清单.md) · [作品简介](docs/作品简介.md) · [技术文档](docs/技术文档.md) · [演示脚本](docs/演示脚本.md) · [在线演示部署](docs/在线演示部署.md) · [Prompt 快照模板](recordings/prompts/)。
+
 ## 架构
 
 ```
@@ -24,7 +26,7 @@
 
 ## 目录
 
-见仓库内 `src/`、`runbooks/`、`demo/`、`prompts/`、`tests/`。
+见仓库内 `src/`、`runbooks/`、`demo/`、`prompts/`、`tests/`、`docs/`、`recordings/prompts/`。
 
 ## 快速开始（MOCK）
 
@@ -131,12 +133,44 @@ MOCK=0 python -m src.cli --scenario imagepull --pod demo-imagepull
 6. **真实集群彩蛋（可选）**：`inject_faults.sh` → `MOCK=0` 诊断；若要改集群，必须再带 `--confirm YES`。  
 7. **收尾（30s）**：作品集定位——可观测取证 + 知识检索 + 人工确认后的可控处置。
 
-## 赛道提交注意
+## 传智杯提交
 
-- 不要提交 `.env`、kubeconfig、API Key；只用 `.env.example`。  
-- 演示优先 MOCK，评委环境无集群也能复现。  
-- 报告中的 kubectl **写操作**必须保留「需人工确认」。默认路径不会 apply。  
-- 写清个人贡献：工具设计、Runbook、Agent 编排、确认门闩、UI/演示脚本。
+推荐赛道：**AI大模型创新应用挑战赛**（个人赛）。同一套代码也可按 **AI创新应用挑战赛** 准备材料。对照表、已完成项和待办见 [docs/提交清单.md](docs/提交清单.md)。
+
+公开仓库：<https://github.com/wangqi040318-gif/k8s-sre-agent>
+
+| 材料 | 位置 | 谁来完成 |
+|---|---|---|
+| README、`.env.example`、Mock 复现 | 本文件 | 已在仓库 |
+| 一页简介 | [docs/作品简介.md](docs/作品简介.md) | 导出或粘贴前填姓名和学校 |
+| 技术文档草稿（PDF ≤30 页） | [docs/技术文档.md](docs/技术文档.md) | 作者导出 PDF 并核对页数 |
+| 5–8 分钟普通话口播 | [docs/演示脚本.md](docs/演示脚本.md) | 作者录像，不要把 mp4 提交进 Git |
+| 公网演示 URL | [docs/在线演示部署.md](docs/在线演示部署.md) | **待办。** 大模型赛道报名表需要这个地址 |
+| Prompt 快照 | [recordings/prompts/](recordings/prompts/) | 模板。创新应用赛道须换成真实对话导出 |
+
+评委无集群、无 API Key 时的路径：
+
+```bash
+cp .env.example .env          # .env 不要提交；无 Key 即规则回退
+python -m src.rag.ingest
+MOCK=1 python -m src.cli --scenario imagepull
+MOCK=1 python -m src.cli --apply --action fix-image --scenario imagepull
+MOCK=1 python -m src.cli --apply --confirm YES --action fix-image --scenario imagepull
+MOCK=1 streamlit run src/ui/app.py
+pytest -q
+```
+
+不带 `--confirm` 的那条 `--apply` 会拒绝，不改 Mock 状态。带 `--confirm YES` 的那条才打印「已模拟执行」。界面上要输入 `CONFIRM`，「执行修复」才会从禁用变为可点。
+
+公网演示尚未部署。把 Streamlit 发布到 Community Cloud 或同等 HTTPS 地址的步骤写在 [docs/在线演示部署.md](docs/在线演示部署.md)。部署时保持 `MOCK=1`，不要上传 kubeconfig。URL 只填报名表，仓库里不预写一个还不存在的域名。
+
+提交时还要注意：
+
+- 不要提交 `.env`、kubeconfig、API Key、录像文件；环境只保留 `.env.example`。
+- 演示优先 MOCK，评委环境无集群也能复现。
+- 报告中的 kubectl 写操作保留「需人工确认」。诊断路径不会 apply。
+- 不要改写已有 Git 历史，也不要 force-push。现有提交能看出「先诊断、后确认修复」，但单次体积偏大；之后的改动按小步提交。说明见提交清单。
+- 个人信息（姓名、学校、学号）填报名表，不必写进仓库。
 
 ## 已实现 / 刻意简化
 

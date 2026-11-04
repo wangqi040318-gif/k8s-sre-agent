@@ -16,3 +16,10 @@ build/
 *.log
 .coverage
 htmlcov/
+
+# 演示录像体积大，按赛方要求另交 MP4 或视频平台链接
+recordings/**/*.mp4
+recordings/**/*.mov
+recordings/**/*.webm
+recordings/**/*.mkv
+recordings/**/*.avi
