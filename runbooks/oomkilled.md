@@ -20,6 +20,7 @@
 - 合理上调 memory limit / 优化应用
 - 增加 HPA 或限流，避免单 Pod 过载
 - 变更资源必须走评审，避免节点资源被挤爆
+- 本仓库可确认执行的动作 id：`bump-memory`（将 memory limit 上调到 `256Mi`）。诊断不会自动执行，需 `--confirm YES` 或输入 `CONFIRM`
 
 ## 风险
 盲目提高 limit 可能掩盖泄漏；删除 Pod 会导致短暂服务中断。

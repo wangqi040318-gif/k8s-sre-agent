@@ -20,6 +20,7 @@
 - 更正镜像引用后滚动发布
 - 修复 Secret / ServiceAccount 拉取凭证
 - 勿在未审批情况下向生产直接 `kubectl apply` 未知清单
+- 本仓库可确认执行的动作 id：`fix-image`（把镜像改为 `nginx:1.27` 后重建）。诊断不会自动执行，需 `--confirm YES` 或输入 `CONFIRM`
 
 ## 风险
 错误修改 Secret 或镜像可能扩大故障面；优先只读验证。
