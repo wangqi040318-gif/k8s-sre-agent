@@ -12,6 +12,7 @@ __pycache__/
 dist/
 build/
 .DS_Store
+# 真实密钥只放在本地或 Cloud Secrets。secrets.toml.example 可以提交。
 .streamlit/secrets.toml
 *.log
 .coverage
