@@ -50,7 +50,7 @@ pytest -q
 MOCK=1 streamlit run src/ui/app.py
 ```
 
-其他场景：`--scenario oom` / `--scenario crashloop`。
+其他场景：`--scenario oom`、`crashloop`、`pending`（排不上节点）、`configmount`（ConfigMap 缺失）、`probe`（探针未就绪）、`connectivity`（Service 无 Endpoints）。
 
 ## 人工确认后执行修复
 
@@ -85,6 +85,10 @@ MOCK=1 python -m src.cli --apply --action fix-image --scenario imagepull
 | imagepull | `fix-image` | 把容器镜像改为 `nginx:1.27`。属于 Deployment 时更新模板并删除异常 Pod；独立 Pod 则按新镜像重建 |
 | oom | `bump-memory` | 把容器 memory limit 上调到 `256Mi` |
 | crashloop | `fix-command` | 把启动命令改为健康休眠，并移除 liveness/readiness/startup 探针（若存在） |
+| pending | `relax-scheduling` | 把过高的 requests/limits 降到 cpu `100m`/`200m`、memory `64Mi`/`128Mi`，并去掉对不上的 nodeSelector 与 affinity。不改 tolerations，不操作节点 |
+| configmount | `create-config` | 创建缺失的 ConfigMap `app-config`（非敏感键）。已存在时只补缺失键，不覆盖，不写 Secret，不删 Pod |
+| probe | `fix-probe` | 把 readiness/liveness 的 httpGet 改成 path `/`、port `80`。保留周期和失败阈值，不删探针 |
+| connectivity | `fix-selector` | 把 Service `demo-web` 的 selector 改成 `app=demo`。不改端口，不放宽 NetworkPolicy |
 
 `MOCK=1`（默认）时，确认后的 apply 只打印将要执行的命令，并更新进程内的 Mock 状态，不需要 kubeconfig。
 
@@ -127,7 +131,7 @@ MOCK=0 python -m src.cli --scenario imagepull --pod demo-imagepull
 
 1. **开场（30s）**：说明 MOCK 可复现；打开 Streamlit 选 ImagePullBackOff。  
 2. **跑诊断（1min）**：展示报告中的现象 / 根因 / 证据 /「需人工确认」命令。  
-3. **换场景（1min）**：切 OOM、CrashLoop，强调证据与 Runbook 命中变化。  
+3. **换场景（1min）**：切 OOM、CrashLoop，再打开 Pending、探针未就绪或 Service 无 Endpoints 里的一个。证据和 Runbook 会变，确认门闩不变。  
 4. **架构（1min）**：LangGraph 节点 + 本地 RAG + LLM/规则双路径。  
 5. **确认后修复（1min）**：指出报告里的 `fix-image`。先不加 `--confirm` 展示拒绝；再 `--confirm YES`，MOCK 下看到「已模拟执行」。强调默认不写集群。  
 6. **真实集群彩蛋（可选）**：`inject_faults.sh` → `MOCK=0` 诊断；若要改集群，必须再带 `--confirm YES`。  
@@ -176,7 +180,7 @@ pytest -q
 
 | 项 | 状态 |
 |----|------|
-| Mock 三场景一致证据 | ✅ |
+| Mock 七类值班故障证据 | ✅ 含调度、ConfigMap 挂载、探针、Service Endpoints |
 | TF-IDF RAG | ✅（未强制 chromadb，减负且离线可用） |
 | LangGraph + 状态机回退 | ✅ |
 | 无 Key 规则诊断 | ✅ |
